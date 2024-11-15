@@ -1,4 +1,3 @@
-
 import os
 import streamlit as st
 import tensorflow as tf
@@ -160,10 +159,10 @@ if uploaded_file is not None:
     )
 
     if selected_model == "Transfer Learning - Xception":
-        model = load_xception_model("/content/xception_model.weights.h5")
+        model = load_xception_model("xception_model.weights.h5")
         img_size = (150, 150)
     else:
-        model = load_custom_cnn_model()
+        model = load_custom_cnn_model("cnn_model.h5")
         img_size = (150, 150)
 
     labels = ['Glioma', 'Meningioma', 'No tumor', 'Pituitary']
