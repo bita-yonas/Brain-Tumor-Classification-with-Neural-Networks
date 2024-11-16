@@ -27,7 +27,7 @@ output_dir = "saliency_maps"
 os.makedirs(output_dir, exist_ok=True)
 
 def generate_explanation(img_path, model_prediction, confidence):
-      prompt = f"""
+    prompt = f"""
 You are a distinguished neurologist and MRI diagnostic expert, recognized globally for your expertise in brain tumor detection and radiological interpretation. You have been called upon to provide a comprehensive analysis of a saliency map produced by a cutting-edge deep learning model. This model has been rigorously trained to classify MRI brain scans into one of four categories: glioma, meningioma, pituitary tumor, or no tumor.
 
 The saliency map highlights regions of interest in the MRI scan, particularly those areas marked in light cyan, which the model considers most critical for its classification. For this specific MRI scan, the model has classified it as '{model_prediction}' with a confidence level of {confidence * 100}%. Your task is to offer an expert-level interpretation of these highlighted areas and the model's decision.
