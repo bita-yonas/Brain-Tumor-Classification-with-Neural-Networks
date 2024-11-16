@@ -1,3 +1,5 @@
+%%writefile app.py
+
 import os
 import streamlit as st
 import tensorflow as tf
@@ -12,7 +14,6 @@ import plotly.graph_objects as go
 import cv2
 import google.generativeai as genai
 import gc
-from fpdf import FPDF
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -24,75 +25,99 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 # Set to CPU only for custom CNN model
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-# Ensure the `saliency_maps` directory exists
 output_dir = "saliency_maps"
-if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-def sanitize_text(text):
-    """Replace non-ASCII characters with ASCII equivalents."""
-    replacements = {
-        "–": "-",  # en dash
-        "“": '"',  # left double quotation mark
-        "”": '"',  # right double quotation mark
-        "’": "'",  # right single quotation mark
-        "•": "-",  # bullet point
-        # Add more replacements as needed
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-    return text
+os.makedirs(output_dir, exist_ok=True)
 
 def generate_explanation(img_path, model_prediction, confidence):
-    prompt = f"""
-    Your detailed prompt for explanation generation here.
-    """
+      prompt = f"""
+You are a distinguished neurologist and MRI diagnostic expert, recognized globally for your expertise in brain tumor detection and radiological interpretation. You have been called upon to provide a comprehensive analysis of a saliency map produced by a cutting-edge deep learning model. This model has been rigorously trained to classify MRI brain scans into one of four categories: glioma, meningioma, pituitary tumor, or no tumor.
+
+The saliency map highlights regions of interest in the MRI scan, particularly those areas marked in light cyan, which the model considers most critical for its classification. For this specific MRI scan, the model has classified it as '{model_prediction}' with a confidence level of {confidence * 100}%. Your task is to offer an expert-level interpretation of these highlighted areas and the model's decision.
+
+Your response must include detailed insights into the following aspects:
+
+1. **Identification of Critical Anatomical Regions**: 
+    - Identify the specific anatomical regions of the brain that are emphasized in the saliency map.
+    - Provide precise descriptions of these regions in the context of their typical MRI appearance and their role in the model's classification.
+
+2. **Correlation with the Predicted Tumor Type ('{model_prediction}')**: 
+    - Explain how the highlighted areas correlate with the presence or absence of the predicted condition.
+    - Discuss the known biological or structural changes in these regions that are characteristic of '{model_prediction}'.
+
+3. **Saliency Map Patterns and Interpretations**: 
+    - Examine the distribution and intensity of the cyan highlights. Are there patterns or clusters that suggest key areas of the model's focus? 
+    - Interpret how these patterns align with known radiological features of glioma, meningioma, pituitary tumor, or normal brain anatomy.
+
+4. **Biological and Clinical Significance**:
+    - Delve into the biological reasons why these specific regions might be significant for diagnosing the '{model_prediction}'.
+    - For tumor categories, discuss typical growth patterns, common regions of origin, and expected effects on nearby structures visible in MRI scans.
+
+5. **Model Decision Validation**:
+    - Critically assess how well the model’s highlighted regions support its prediction. 
+    - Discuss whether the saliency map's focus is consistent with established clinical knowledge of '{model_prediction}'.
+    - If the prediction is “no tumor,” explain why the saliency map avoids focusing on tumor-indicative regions.
+
+6. **Potential Limitations or Anomalies**:
+    - Identify any potential concerns with the saliency map. Are there regions of focus that seem clinically irrelevant or contradictory to the prediction?
+    - Offer a hypothesis for any anomalies or unexpected focus areas.
+
+7. **Implications for Clinical Decision-Making**:
+    - Reflect on how this analysis might influence the patient’s clinical pathway. Could these findings suggest a need for additional scans, biopsy, or alternative treatment plans?
+
+8. **Technical and Clinical Fusion**:
+    - Bridge the technical aspects of the saliency map with your clinical expertise. Offer a synthesis that validates the model's decision-making while providing a clinically actionable perspective.
+
+9. **Depth of Response**:
+    - Avoid redundancy and ensure each sentence contributes a new layer of insight. 
+    - Provide concrete examples or references to clinical scenarios, if applicable, to reinforce your interpretations.
+    - Structure your response with clear sections or paragraphs to maintain logical flow and coherence.
+
+Your analysis should aim for clarity, depth, and precision, with a length of 10–12 sentences or more if required to comprehensively address all aspects. The goal is to produce a detailed, authoritative interpretation that harmonizes advanced AI insights with deep clinical understanding.
+
+Let’s proceed methodically, step by step, as we decode the map with surgical precision.
+"""
     model = genai.GenerativeModel(model_name="gemini-1.5-flash")
     response = model.generate_content(prompt)
-    return sanitize_text(response.text)
+    return response.text
 
 def generate_saliency_map(model, img_array, class_index, img_size):
-    with tf.GradientTape() as tape:
-        img_tensor = tf.convert_to_tensor(img_array)
-        tape.watch(img_tensor)
-        predictions = model(img_tensor)
-        target_class = predictions[:, class_index]
+    """Generate a saliency map to highlight areas of importance for the model's prediction."""
+    try:
+        with tf.GradientTape() as tape:
+            img_tensor = tf.convert_to_tensor(img_array)
+            tape.watch(img_tensor)
+            predictions = model(img_tensor)
+            target_class = predictions[:, class_index]
 
-    gradients = tape.gradient(target_class, img_tensor)
-    gradients = tf.math.abs(gradients)
-    gradients = tf.reduce_max(gradients, axis=-1).numpy().squeeze()
+        # Compute gradients
+        gradients = tape.gradient(target_class, img_tensor)
+        gradients = tf.math.abs(gradients)  # Absolute values of gradients
+        gradients = tf.reduce_max(gradients, axis=-1).numpy().squeeze()
 
-    if gradients.max() > 0:
-        gradients /= gradients.max()
+        # Normalize gradients
+        gradients = np.clip(gradients, 0, None)
+        if gradients.max() > 0:
+            gradients /= gradients.max()
 
-    gradients_resized = cv2.resize(gradients, img_size)
-    heatmap = cv2.applyColorMap(np.uint8(255 * gradients_resized), cv2.COLORMAP_JET)
-    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-    original_img = (img_array[0] * 255).astype("uint8")
-    superimposed_img = cv2.addWeighted(heatmap, 0.6, original_img, 0.4, 0)
+        # Resize gradients to match the image size
+        gradients_resized = cv2.resize(gradients, img_size)
 
-    saliency_map_path = os.path.join(output_dir, "saliency_map.jpg")
-    cv2.imwrite(saliency_map_path, cv2.cvtColor(superimposed_img, cv2.COLOR_RGB2BGR))
+        # Apply a heatmap color map
+        heatmap = cv2.applyColorMap(np.uint8(255 * gradients_resized), cv2.COLORMAP_JET)
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
-    return saliency_map_path
+        # Create a superimposed image
+        original_img = (img_array[0] * 255).astype("uint8")
+        superimposed_img = cv2.addWeighted(heatmap, 0.6, original_img, 0.4, 0)
 
-def generate_report(prediction, confidence, explanation, historical_cases, next_steps):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Brain Tumor Classification Report", ln=True, align="C")
-    pdf.cell(200, 10, txt=f"Prediction: {prediction}", ln=True)
-    pdf.cell(200, 10, txt=f"Confidence: {confidence:.2%}", ln=True)
-    pdf.cell(200, 10, txt="Explanation:", ln=True)
-    pdf.multi_cell(0, 10, txt=sanitize_text(explanation))
-    pdf.cell(200, 10, txt="Historical Cases:", ln=True)
-    pdf.multi_cell(0, 10, txt=sanitize_text(historical_cases))
-    pdf.cell(200, 10, txt="Recommended Next Steps:", ln=True)
-    pdf.multi_cell(0, 10, txt=sanitize_text(next_steps))
+        # Save the saliency map
+        saliency_map_path = os.path.join(output_dir, "saliency_map.jpg")
+        cv2.imwrite(saliency_map_path, cv2.cvtColor(superimposed_img, cv2.COLOR_RGB2BGR))
 
-    report_path = os.path.join(output_dir, "brain_tumor_classification_report.pdf")
-    pdf.output(report_path)
-    return report_path
+        return saliency_map_path
+    except Exception as e:
+        st.error(f"Error generating saliency map: {e}")
+        return None
 
 def load_xception_model(model_path):
     img_shape = (150, 150, 3)
@@ -127,10 +152,10 @@ if uploaded_file is not None:
     )
 
     if selected_model == "Transfer Learning - Xception":
-        model = load_xception_model("xception_model.weights.h5")
+        model = load_xception_model("/content/xception_model.weights.h5")
         img_size = (150, 150)
     else:
-        model = load_custom_cnn_model("cnn_model.h5")
+        model = load_custom_cnn_model("/content/cnn_model.h5")
         img_size = (224, 224)
 
     labels = ['Glioma', 'Meningioma', 'No tumor', 'Pituitary']
@@ -239,18 +264,6 @@ if uploaded_file is not None:
     explanation = generate_explanation(saliency_map_path, result, confidence)
     st.write("## Expert Analysis of Saliency Map")
     st.write(explanation)
-
-    historical_cases = "Based on previous cases, this prediction aligns with known patterns in similar patients."
-    next_steps = "Schedule a follow-up with a neurologist for monitoring and assessment."
-    report_path = generate_report(result, confidence, explanation, historical_cases, next_steps)
-
-    with open(report_path, "rb") as f:
-        st.download_button(
-            label="Download Report as PDF",
-            data=f,
-            file_name="brain_tumor_classification_report.pdf",
-            mime="application/pdf",
-        )
 
     del model
     gc.collect()
